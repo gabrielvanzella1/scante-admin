@@ -188,12 +188,15 @@ class Licenca extends Model {
     public function estatisticas(): array {
         return $this->db->queryOne("
             SELECT
-                COUNT(*)                        AS total,
-                SUM(status = 'ativa')           AS ativas,
-                SUM(status = 'trial')           AS trial,
-                SUM(status = 'expirada')        AS expiradas,
-                SUM(status = 'revogada')        AS revogadas,
-                SUM(tipo   = 'vitalicia')       AS vitalicias,
+                COUNT(*)                                                                                                                               AS total,
+                SUM(status IN ('ativa','trial'))                                                                                                       AS ativas,
+                SUM(tipo   = 'trial')                                                                                                                  AS trial,
+                SUM(tipo   = 'mensal')                                                                                                                 AS mensal,
+                SUM(tipo   = 'anual')                                                                                                                  AS anual,
+                SUM(tipo   = 'vitalicia')                                                                                                              AS vitalicias,
+                SUM(status = 'expirada')                                                                                                               AS expiradas,
+                SUM(status = 'revogada')                                                                                                               AS revogadas,
+                SUM(device_id IS NOT NULL AND status IN ('ativa','trial'))                                                                             AS dispositivos_ativos,
                 SUM(tipo != 'vitalicia' AND expira_em IS NOT NULL AND expira_em BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY) AND status='ativa') AS expirando_7d
             FROM licencas
         ") ?? [];
