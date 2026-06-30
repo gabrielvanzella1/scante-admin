@@ -192,6 +192,9 @@ class CheckoutController extends Controller {
                     $licenca['device_nome'] ?? 'ScanTE',
                     APP_URL
                 );
+                // Guarda na sessão para recuperar a chave na página de sucesso
+                $_SESSION['checkout_licenca_id'] = $licencaId;
+                $_SESSION['checkout_token']      = $this->token($licencaId);
                 $this->redirectTo($url);
             } catch (\Throwable $e) {
                 error_log('[MercadoPago] ' . $e->getMessage());
@@ -202,13 +205,15 @@ class CheckoutController extends Controller {
 
         // Pagar.me: pagamento vem via webhook, não por aqui
         if ($gateway === 'pagarme') {
+            $_SESSION['checkout_licenca_id'] = $licencaId;
+            $_SESSION['checkout_token']      = $this->token($licencaId);
             $this->redirectTo(APP_URL . '/checkout/pagamento?id=' . $licencaId . '&h=' . $token);
             return;
         }
 
-        // Modo dev: ativa direto
+        // Modo dev: ativa direto e passa id+token para a página de sucesso
         (new Licenca())->ativarAposPagamento($licencaId, $tipo, 'DEV-' . $licencaId);
-        $this->redirectTo(APP_URL . '/checkout/sucesso');
+        $this->redirectTo(APP_URL . '/checkout/sucesso?id=' . $licencaId . '&h=' . $this->token($licencaId));
     }
 
     // ----------------------------------------------------------------
@@ -265,9 +270,10 @@ class CheckoutController extends Controller {
                 exit;
             }
 
-            // Aprovado (cartão/débito): ativa imediatamente
+            // Aprovado (cartão/débito): ativa imediatamente e devolve URL de sucesso
             if ($resultado['status'] === 'approved') {
                 (new Licenca())->ativarAposPagamento($licencaId, $tipo, $resultado['id']);
+                $resultado['redirect_url'] = APP_URL . '/checkout/sucesso?id=' . $licencaId . '&h=' . $this->token($licencaId);
             }
 
             echo json_encode($resultado);
@@ -301,7 +307,37 @@ class CheckoutController extends Controller {
     // Páginas de resultado
     // ----------------------------------------------------------------
 
-    public function sucesso(): void   { $this->view('checkout.sucesso',   [], 'checkout'); }
+    public function sucesso(): void {
+        // Tenta recuperar a licença pelo id+token (passado via query string ou sessão)
+        $licencaId = (int)($_GET['id'] ?? $_SESSION['checkout_licenca_id'] ?? 0);
+        $token     = $_GET['h'] ?? $_SESSION['checkout_token'] ?? '';
+
+        $chave    = null;
+        $pendente = false;
+
+        if ($licencaId && $token && hash_equals($this->token($licencaId), $token)) {
+            $licenca = (new Licenca())->findById($licencaId);
+            if ($licenca) {
+                if ($licenca['status'] === 'ativa') {
+                    $chave = $licenca['chave'];
+                } elseif ($licenca['status'] === 'pendente') {
+                    // Webhook ainda não chegou (PIX / async) — JS vai fazer polling
+                    $pendente = true;
+                }
+            }
+        }
+
+        // Limpa a sessão após usar
+        unset($_SESSION['checkout_licenca_id'], $_SESSION['checkout_token']);
+
+        $this->view('checkout.sucesso', [
+            'chave'      => $chave,
+            'pendente'   => $pendente,
+            'licencaId'  => $licencaId,
+            'token'      => $token,
+        ], 'checkout');
+    }
+
     public function cancelado(): void { $this->view('checkout.cancelado', [], 'checkout'); }
 
     // ----------------------------------------------------------------
